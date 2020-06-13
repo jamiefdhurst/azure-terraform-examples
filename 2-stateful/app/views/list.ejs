@@ -1,0 +1,31 @@
+<%- include('layouts/header') %>
+
+      <div class="row">
+        <div class="col-md-12">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (let i = 0; i < data.length; i++) { %>
+                <tr>
+                  <td><%= data[i].name %></td>
+                  <td>
+                    <a class="btn btn-primary" href="/edit/<%= data[i].id %>">Edit</a>
+                    <a class="btn btn-danger" href="/delete/<%= data[i].id %>">Delete</a>
+                  </td>
+                </tr>
+              <% } %>
+            </tbody>
+          </table>
+
+          <p>
+            <a class="btn btn-success" href="/add">Add</a>
+          </p>
+        </div>
+      </div>
+        
+<%- include('layouts/footer') %>

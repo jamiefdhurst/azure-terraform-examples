@@ -14,11 +14,16 @@ provider "random" {
 provider "kubernetes" {
   version = "~> 1.11"
 
-  host = azurerm_kubernetes_cluster.aks_cluster.kube_config[0].host
+  host = azurerm_kubernetes_cluster.stateful.kube_config[0].host
   load_config_file = false
-  client_certificate = base64decode(azurerm_kubernetes_cluster.aks_cluster.kube_config[0].client_certificate)
-  client_key = base64decode(azurerm_kubernetes_cluster.aks_cluster.kube_config[0].client_key)
-  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.aks_cluster.kube_config[0].cluster_ca_certificate)
+  client_certificate = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].client_certificate)
+  client_key = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].client_key)
+  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].cluster_ca_certificate)
+}
+
+# Include the Helm provider for releasing the Nginx ingress controller.
+provider "helm" {
+  version = "~> 1.2"
 }
 
 # Resource group - everything in Azure belongs to this, a collection to hold all
@@ -41,14 +46,6 @@ resource "azurerm_virtual_network" "vnet" {
 resource "azurerm_subnet" "subnet_aks" {
   address_prefixes      = [var.subnet_aks_prefix]
   name                  = "${var.prefix}-subnet-aks"
-  resource_group_name   = azurerm_resource_group.stateful.name
-  virtual_network_name  = azurerm_virtual_network.vnet.name
-}
-
-# Subnet - the portion of the VNet that will be used to host the app gateway..
-resource "azurerm_subnet" "subnet_agw" {
-  address_prefixes      = [var.subnet_agw_prefix]
-  name                  = "${var.prefix}-subnet-agw"
   resource_group_name   = azurerm_resource_group.stateful.name
   virtual_network_name  = azurerm_virtual_network.vnet.name
 }
@@ -83,33 +80,22 @@ resource "azurerm_network_security_group" "stateful" {
     source_address_prefix      = var.source_network
     destination_address_prefix = "*"
   }
-
-  security_rule {
-    name                       = "SSH"
-    priority                   = 102
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "TCP"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = var.source_network
-    destination_address_prefix = "*"
-  }
 }
 
 # Associate the security gropu with the subnet.
 resource "azurerm_subnet_network_security_group_association" "stateful" {
-  subnet_id                 = azurerm_subnet.subnet_agw.id
+  subnet_id                 = azurerm_subnet.subnet_aks.id
   network_security_group_id = azurerm_network_security_group.stateful.id
 }
 
 # Public IP - our VM will need a public IP to be internet addressable.
 resource "azurerm_public_ip" "stateful" {
-  allocation_method   = "Dynamic"
+  allocation_method   = "Static"
   domain_name_label   = var.hostname
   location            = var.location
   name                = "${var.prefix}-ip"
-  resource_group_name = azurerm_resource_group.stateful.name
+  resource_group_name = azurerm_kubernetes_cluster.stateful.node_resource_group
+  sku                 = "Standard"
 }
 
 # MySQL database password - create the MySQL password randomly.
@@ -151,6 +137,15 @@ resource "azurerm_mysql_database" "stateful" {
   server_name         = azurerm_mysql_server.stateful.name
 }
 
+# MysQL Firewall - allows access from Azure services (e.g. AKS).
+resource "azurerm_mysql_firewall_rule" "stateful" {
+  name                = "stateful-aks-access"
+  resource_group_name = azurerm_resource_group.stateful.name
+  server_name         = azurerm_mysql_server.stateful.name
+  start_ip_address    = "0.0.0.0"
+  end_ip_address      = "0.0.0.0"
+}
+
 # Kubernetes CLuster - fire up a Kubernetes cluster within AKS.
 resource "azurerm_kubernetes_cluster" "stateful" {
   dns_prefix          = "${var.prefix}-aks"
@@ -186,7 +181,6 @@ resource "azurerm_kubernetes_cluster" "stateful" {
   network_profile {
     docker_bridge_cidr = "172.28.0.1/25"
     dns_service_ip     = "172.29.0.10"
-    load_balancer_sku  = "standard"
     network_plugin     = "azure"
     network_policy     = "calico"
     pod_cidr           = null
@@ -194,67 +188,137 @@ resource "azurerm_kubernetes_cluster" "stateful" {
   }
 }
 
-# Application Gateway - create the front end load balancer for serving the 
-# application.
-resource "azurerm_application_gateway" "stateful" {
-  name                = "${var.prefix}-agw"
-  location            = var.location
-  resource_group_name = azurerm_resource_group.stateful.name
-  
-  backend_address_pool {
-    name = "bepool"
+# Role Assignment - allow Kubernetes to access subnet.
+resource "azurerm_role_assignment" "stateful" {
+  scope                = azurerm_resource_group.stateful.id
+  role_definition_name = "Network Contributor"
+  principal_id         = azurerm_kubernetes_cluster.stateful.identity[0].principal_id
+}
+
+# Kubernetes Ingress Controller - required for ingress.
+resource "helm_release" "ingress_controller" {
+  name = "nginx-ingress"
+  repository = "https://kubernetes-charts.storage.googleapis.com/"
+  chart = "nginx-ingress"
+
+  set {
+    name = "controller.replicaCount"
+    value = 2
   }
 
-  backend_http_settings {
-    name                  = "appGatewayBackendHttpSettings"
-    cookie_based_affinity = "Enabled"
-    port                  = 80
-    protocol              = "Http"
+  set_string {
+    name = "controller.nodeSelector.beta\\.kubernetes\\.io/os"
+    value = "linux"
   }
 
-  frontend_ip_configuration {
-    name                 = "appGatewayFrontendIP"
-    public_ip_address_id = azurerm_public_ip.stateful.id
+  set_string {
+    name = "defaultBackend.nodeSelector.beta\\.kubernetes\\.io/os"
+    value = "linux"
   }
 
-  frontend_port {
-    name = "httpPort"
-    port = 80
+  set {
+    name = "controller.service.loadBalancerIP"
+    value = azurerm_public_ip.stateful.ip_address
+  }
+}
+
+# # Kubernetes Deployment - deploy the application onto a pod.
+resource "kubernetes_deployment" "stateful" {
+  metadata {
+    name = "stateful-app"
+    labels = {
+      app = "stateful-app"
+    }
   }
 
-  frontend_port {
-    name = "httpsPort"
-    port = 443
+  spec {
+    replicas = 2
+
+    selector {
+      match_labels = {
+        app = "stateful-app"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "stateful-app"
+        }
+      }
+
+      spec {
+        container {
+          image = "jamiefdhurst/node-stateful-example:latest"
+          name  = "stateful-app"
+
+          env {
+            name  = "DB_HOST"
+            value = azurerm_mysql_server.stateful.fqdn
+          }
+
+          env {
+            name  = "DB_NAME"
+            value = var.prefix
+          }
+
+          env {
+            name  = "DB_PASSWORD"
+            value = random_string.mysql_password.result
+          }
+
+          env {
+            name  = "DB_USERNAME"
+            value = "mysqladmin@${var.prefix}-mysql"
+          }
+
+          port {
+            container_port = 3000            
+          }
+
+        }
+      }
+    }
+  }
+}
+
+# Kubernetes Service - expose the service on port 3000.
+resource "kubernetes_service" "stateful" {
+  metadata {
+    name = "stateful-svc"
+  }
+  spec {
+    port {
+      port        = 80
+      target_port = 3000
+    }
+    selector = {
+      app = "stateful-app"
+    }
+    type = "ClusterIP"
+  }
+}
+
+# Kubernetes Ingress - allow access via application gateway.
+resource "kubernetes_ingress" "stateful" {
+  metadata {
+    name = "stateful-ingress"
+    annotations = {
+      "kubernetes.io/ingress.class" = "nginx"
+    }
   }
 
-  gateway_ip_configuration {
-    name      = "appGatewayIP"
-    subnet_id = azurerm_subnet.subnet_agw.id
-  }
-
-  http_listener {
-    name                           = "httpListener"
-    frontend_ip_configuration_name = "appGatewayFrontendIP"
-    frontend_port_name             = "httpPort"
-    protocol                       = "Http"
-  }
-
-  request_routing_rule {
-    name               = "rule1"
-    http_listener_name = "httpListener"
-    rule_type          = "Basic"
-
-    backend_address_pool_name  = "bepool"
-    backend_http_settings_name = "appGatewayBackendHttpSettings"
-  }
-
-  sku {
-    capacity  = var.agw_sku_capacity
-    name      = var.agw_sku_name
-    tier      = var.agw_sku_tier
-  }
-
-  lifecycle {
-    ignore_changes = [redirect_configuration, ssl_certificate, backend_address_pool, backend_http_settings, http_listener, request_routing_rule, probe, frontend_port, gateway_ip_configuration, url_path_map, tags["ingress-for-aks-cluster-id"], tags["last-updated-by-k8s-ingress"], tags["managed-by-k8s-ingress"]]
+  spec {
+    rule {
+      http {
+        path {
+          backend {
+            service_name = "stateful-svc"
+            service_port = 80
+          }
+          path = "/"
+        }
+      }
+    }
   }
 }

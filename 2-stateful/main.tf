@@ -107,7 +107,7 @@ resource "azurerm_public_ip" "stateful" {
 
 # MySQL database password - create the MySQL password randomly.
 resource "random_string" "mysql_password" {
-  length = 12
+  length = 16
   special = false
   upper = true
   lower = true

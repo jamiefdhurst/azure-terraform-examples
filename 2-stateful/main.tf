@@ -161,7 +161,7 @@ resource "azurerm_kubernetes_cluster" "stateful" {
   resource_group_name = var.resource_group
 
   default_node_pool {
-    availability_zones    = [1]
+    availability_zones    = [1, 2, 3]
     enable_auto_scaling   = true
     enable_node_public_ip = false
     max_count             = var.aks_vms_max

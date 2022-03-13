@@ -48,7 +48,7 @@ variable "source_network" {
 
 variable "kubernetes_version" {
   description = "Kubernetes version to deploy onto AKS."
-  default     = "1.16.9"
+  default     = "1.21.9"
 }
 
 variable "aks_vm_size" {

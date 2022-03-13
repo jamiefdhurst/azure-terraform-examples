@@ -18,7 +18,7 @@ variable "hostname" {
 
 variable "location" {
   description = "The region where resources is created"
-  default     = "uksouth"
+  default     = "eastus"
 }
 
 variable "virtual_network_name" {

@@ -23,7 +23,7 @@ provider "kubernetes" {
 
 # Include the Helm provider for releasing the Nginx ingress controller.
 provider "helm" {
-  version = "~> 1.2"
+  version = "~> 2"
 
   kubernetes {
     host = azurerm_kubernetes_cluster.stateful.kube_config[0].host
@@ -212,12 +212,14 @@ resource "helm_release" "ingress_controller" {
     value = 2
   }
 
-  set_string {
+  set {
+    type = "string"
     name = "controller.nodeSelector.beta\\.kubernetes\\.io/os"
     value = "linux"
   }
 
-  set_string {
+  set {
+    type = "string"
     name = "defaultBackend.nodeSelector.beta\\.kubernetes\\.io/os"
     value = "linux"
   }

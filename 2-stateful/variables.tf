@@ -18,7 +18,7 @@ variable "hostname" {
 
 variable "location" {
   description = "The region where resources is created"
-  default     = "eastus"
+  default     = "centralus"
 }
 
 variable "virtual_network_name" {
@@ -53,7 +53,7 @@ variable "kubernetes_version" {
 
 variable "aks_vm_size" {
   description = "Size of VM(s) to use for AKS nodes."
-  default     = "Standard_DC2s_v2"
+  default     = "Standard_DS1"
 }
 
 variable "aks_vms" {

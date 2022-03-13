@@ -53,7 +53,7 @@ variable "kubernetes_version" {
 
 variable "aks_vm_size" {
   description = "Size of VM(s) to use for AKS nodes."
-  default     = "Standard_B2s"
+  default     = "Standard_D2as_v4"
 }
 
 variable "aks_vms" {

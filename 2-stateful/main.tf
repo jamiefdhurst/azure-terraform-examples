@@ -318,6 +318,7 @@ resource "kubernetes_ingress" "stateful" {
 
   spec {
     rule {
+      host = azurerm_public_ip.stateful.fqdn
       http {
         path {
           backend {

@@ -24,6 +24,13 @@ provider "kubernetes" {
 # Include the Helm provider for releasing the Nginx ingress controller.
 provider "helm" {
   version = "~> 1.2"
+
+  kubernetes {
+    host = azurerm_kubernetes_cluster.stateful.kube_config[0].host
+    client_certificate = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].client_certificate)
+    client_key = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].client_key)
+    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.stateful.kube_config[0].cluster_ca_certificate)
+  }
 }
 
 # Resource group - everything in Azure belongs to this, a collection to hold all
@@ -123,7 +130,6 @@ resource "azurerm_mysql_server" "stateful" {
   auto_grow_enabled                 = true
   backup_retention_days             = 7
   geo_redundant_backup_enabled      = false
-  infrastructure_encryption_enabled = true
   public_network_access_enabled     = true
   ssl_enforcement_enabled           = false
 }
@@ -198,7 +204,7 @@ resource "azurerm_role_assignment" "stateful" {
 # Kubernetes Ingress Controller - required for ingress.
 resource "helm_release" "ingress_controller" {
   name = "nginx-ingress"
-  repository = "https://kubernetes-charts.storage.googleapis.com/"
+  repository = "https://helm.nginx.com/stable"
   chart = "nginx-ingress"
 
   set {
